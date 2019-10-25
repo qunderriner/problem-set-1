@@ -1,0 +1,338 @@
+---
+title: "Underriner_HW1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+I did the data munging in python, that has been submited in a juptyer notebook. I outputed in into a CSV that i load below:
+
+```{r intro}
+library(tidyverse)
+library(skimr)
+library(dendextend)
+library(clustertend)
+library(ggplot2)
+library(clValid)
+library(mixtools)
+library(plotGMM)
+library(mclust)
+
+setwd("~/Desktop/school/Comp American/week1 homework/problem-set-1/State Leg Prof Data & Codebook")
+df1 <- read.csv("cleaned_datav2.csv")
+dfstate <- read.csv("state_only.csv")
+```
+
+3. Diagnose clusterability in any way you’d prefer (e.g., sparse sampling, ODI, etc.); display the results and discuss the likelihood that natural, non-random structure exist in these data.
+
+```{r scatter}
+ggplot(df1, aes(x = salary_real, y = expend)) +
+    geom_point()
+
+ggplot(df1, aes(x = salary_real, y = slength)) +
+    geom_point()
+
+
+```
+```{r hopkins}
+hopkins(df1, 10, byrow = F, header = T)
+```
+
+The Hopkins statisitc is not quite >.5, although at ~.3 its rather close. This indicates
+that the data is relativley uniform (as opposed to being random or already in tight clusters), but I 
+do believe still ripe for exploration with clustering meathods. The plot of real salary vs. expditures seems relativley uniform, but there are enough peaks and variations. There does seem to a weak relationship between salary and session length, which makes sense (higher pay for more work).
+
+
+4. Fit a simple agglomerative hierarchical clustering algorithm using any linkage method you prefer, to these data and present the results. Give a quick, high level summary of the output and general patterns.
+
+```{r hierarch}
+# select a few related features, standardize, and calculate euclidean distance matrix
+s_sub <- df1 %>% 
+  select(t_slength, slength, salary_real, expend) %>% 
+  scale() %>% 
+  dist()
+
+
+#s_sub # inspect to make sure features are on the same scale 
+#(there are in fact all the same order of magnitude)
+
+hc_complete <- hclust(s_sub, 
+                      method = "complete"); plot(hc_complete, hang = -1)
+# And we can cut and compare trees if we aren't sure about 6 or 7 clusters, e.g.
+cuts <- cutree(hc_complete, 
+               k = c(3,4,5,6,7))
+
+### Or, a simple matrix of assignments by iteration
+
+table(`6 Clusters` = cuts[,4],
+      `7 Clusters` = cuts[,5])
+      
+```
+There is diminishing returns for adding addition clusters, 6-7 ultimently could be good, but 6 seems to capture an optimal amount (adding a 7th cluster only captures two additional data points), whcih we can see in the dendrogram.  
+
+
+
+5. Fit a k-means algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below.
+
+```{r k-means}
+set.seed(634)
+
+kmeans <- kmeans(df1[ ,2], 
+                 centers = 2,
+                 nstart = 15)
+
+df1$Cluster <- as.factor(kmeans$cluster) # save clusters in df
+
+kmeans <- kmeans(df1[ ,2], 
+                 centers = 6,
+                 nstart = 15)
+
+df1$Cluster6 <- as.factor(kmeans$cluster) # save clusters in df
+
+
+```
+After initially setting this to 2, per exploratory analysis and validation, I set it to 6. At 2 there was some mixing of groups, and the left group (closer to the mean) was larger, which makes sense as this is where the values are mostly located around. At K=6 This staggered graph shows a relatively ordered clustering. It also falls that most have salaries around the mean with a few states that have high lots of money and high salaries pulling out the right tail. 
+
+6. Fit a Gaussian mixture model via the EM algorithm to these data and present the results. Give a quick, high level summary of the output and general patterns. Initialize the algorithm at k=2, and then check this assumption in the validation questions below.
+
+```{r GMM k2}
+set.seed(7355) # set seed for iterations to return to same place
+gmm1 <- normalmixEM(df1$salary_real, k = 2) # fit the GMM using EM and 2 comps
+
+```
+
+Two of these fits okay but we have seen more clusters in the data, and there do seem to be more peaks in the distribution. 
+
+
+```{r GMM k2 6 salary 4 expenditures}
+set.seed(7355)
+
+
+gmm2 <- normalmixEM(df1$salary_real, k = 2)
+
+gmm6<- normalmixEM(df1$salary_real, k = 6)
+
+gmm6_ex<- normalmixEM(df1$expend, k = 4)
+
+
+
+```
+
+There do seem to be three pretty neat peaks, one (green), farther to the right and one smaller peak pushing out to the right when looking at salary. There is also a long right tail that is likely messing with our fit. This is likely high salary places like california. 
+
+```{r GMM continued}
+# Searching for problematic observation, given poor fit of GMM - the answer is row 5 () 
+which(gmm2$x > 3)
+
+df1[5,] 
+
+# now we can try again row 5 
+df2 <- df1[-c(5), ]
+
+# quickly compare to make sure it worked
+with5 <- head(df1$salary_real, 20)
+without5 <- head(df2$salary_real, 20)
+
+head(data.frame(cbind(with5, without5)), 20)
+
+#correct it worked 
+set.seed(1)
+
+gmm6salary_outlier_removed <- normalmixEM(df2$salary_real, k = 6)
+
+
+```
+The output at k=6 seems to best capture the underlying data structure for salary. There are three dense clusterings to the left, and three smaller groups out to the right tail that have become more apparent now that we have removed the outlier.  
+
+
+7. Compare output of all in visually useful, simple ways (e.g., present the dendrogram, 
+plot by state cluster assignment across two features like salary and expenditures, etc.). There should be several plots of comparison and output.
+
+```{r visuals hierarchical clustering algorithm with complete meathod}
+# Fit and viz all in a single pane
+par(mfrow = c(2,2))
+
+hc_complete <- hclust(s_sub, 
+                      method = "complete"); plot(hc_complete, hang = -1)
+
+# reset plot space
+par(mfrow = c(1,1))
+
+```
+
+```{r visuals kmeans}
+# evaluate the distribution of states K-Means outputs based on their cluster assignment
+ggplot(df1, aes(salary_real, fill = Cluster)) + 
+  geom_histogram(binwidth = 1) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red","yellow","purple","green","grey")) +
+  labs(x = "salary",
+       y = "density") +
+  geom_vline(xintercept = 0, linetype="solid", 
+             color = "darkgray", size=1.2)
+
+ggplot(df1, aes(expend, fill = Cluster)) + 
+  geom_histogram(binwidth = 1) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red","yellow","purple","green","grey")) +
+  labs(x = "expenditure",
+       y = "density") +
+  geom_vline(xintercept = 0, linetype="solid", 
+             color = "darkgray", size=1.2)
+
+#here k=6 
+
+ggplot(df1, aes(expend, fill = Cluster6)) + 
+  geom_histogram(binwidth = 1) + 
+  theme_bw() +
+  scale_fill_manual(values=c("blue", "red","yellow","purple","green","grey")) +
+  labs(x = "expenditure",
+       y = "density") +
+  geom_vline(xintercept = 0, linetype="solid", 
+             color = "darkgray", size=1.2)
+
+```
+
+
+```{r visuals gmm2 salary}
+gmm2 <- normalmixEM(df1$salary_real, k = 2)
+
+ggplot(data.frame(x = gmm2$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm2$mu[1], gmm2$sigma[1], lam = gmm2$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm2$mu[2], gmm2$sigma[2], lam = gmm2$lambda[2]),
+                colour = "darkblue") +
+
+  xlab("Salary") +
+  ylab("Density") + 
+  theme_bw()
+```
+
+```{r visuals gmm6 salary}
+gmm6<- normalmixEM(df1$salary_real, k = 6)
+
+ggplot(data.frame(x = gmm6$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[1], gmm6$sigma[1], lam = gmm6$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[2], gmm6$sigma[2], lam = gmm6$lambda[2]),
+                colour = "darkblue") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[3], gmm6$sigma[3], lam = gmm6$lambda[3]),
+                colour = "black") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[4], gmm6$sigma[4], lam = gmm6$lambda[4]),
+                colour = "yellow") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[5], gmm6$sigma[5], lam = gmm6$lambda[5]),
+                colour = "blue") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6$mu[6], gmm6$sigma[6], lam = gmm6$lambda[6]),
+                colour = "green") +
+  xlab("Salary") +
+  ylab("Density") + 
+  theme_bw()
+```
+
+```{r visuals gmm4 expenditures}
+gmm6_ex<- normalmixEM(df1$expend, k = 4)
+
+ggplot(data.frame(x = gmm6_ex$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[1], gmm6_ex$sigma[1], lam = gmm6_ex$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[2], gmm6_ex$sigma[2], lam = gmm6_ex$lambda[2]),
+                colour = "darkblue") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[3], gmm6_ex$sigma[3], lam = gmm6_ex$lambda[3]),
+                colour = "black") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[4], gmm6_ex$sigma[4], lam = gmm6_ex$lambda[4]),
+                colour = "yellow") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[5], gmm6_ex$sigma[5], lam = gmm6_ex$lambda[5]),
+                colour = "blue") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6_ex$mu[6], gmm6_ex$sigma[6], lam = gmm6_ex$lambda[6]),
+                colour = "green") +
+  xlab("Salary") +
+  ylab("Density") + 
+  theme_bw()
+```
+
+In looking at GMM salary without removing an outlier, its clear that k=2 is far too few for the groups. at k=6
+the fit is much better to the underlying distributions, but there is still a clear outlier pulling it to the right. 
+
+The below graph shows a slightly better fit as the outlier is removed 
+
+```{r visuals gmm6 salary removed outlier}
+ggplot(data.frame(x = gmm6salary_outlier_removed$x)) +
+  geom_histogram(aes(x, ..density..), fill = "darkgray") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[1], gmm6salary_outlier_removed$sigma[1], lam = gmm6salary_outlier_removed$lambda[1]),
+                colour = "darkred") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[2], gmm6salary_outlier_removed$sigma[2], lam = gmm6salary_outlier_removed$lambda[2]),
+                colour = "darkblue") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[3], gmm6salary_outlier_removed$sigma[3], lam = gmm6salary_outlier_removed$lambda[3]),
+                colour = "black") +
+  stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[4], gmm6salary_outlier_removed$sigma[4], lam = gmm6salary_outlier_removed$lambda[4]),
+                colour = "yellow") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[5], gmm6salary_outlier_removed$sigma[5], lam = gmm6salary_outlier_removed$lambda[5]),
+                colour = "blue") +
+    stat_function(geom = "line", fun = plot_mix_comps,
+                args = list(gmm6salary_outlier_removed$mu[6], gmm6salary_outlier_removed$sigma[6], lam = gmm6salary_outlier_removed$lambda[6]),
+                colour = "green") +
+  xlab("Salary") +
+  ylab("Density") + 
+  theme_bw()
+  
+```
+
+
+```{r internal validation}
+
+
+pres_int <- as.matrix(df1[,4])#this is for salary 
+
+internal_all <- clValid(pres_int, 2:10, 
+                    clMethods = c("hierarchical", "kmeans", "model"), 
+                    validation = "internal"); summary(internal_all)
+
+par(mfrow = c(2, 2))
+
+plot(internal_all, legend = TRUE,
+     type = "l",
+     main = " ")
+```
+Note: i cant figure out whey the GMM values for K>3 are not showing up. 
+
+a. What can you take away from the fit?
+For silohouette the global max is at 2, with sharp decline then a local maxima at 6 and a relative downward trend from
+there. A higher silohouette score is better, but score at 6 is respectib (and perhaps useful), as dicussed below. 
+
+
+b. Which approach is optimal? And optimal at what value of k?
+Looking at Silhouette width, which gives us a measure of well defined clusters are (where a higher number indicates a better configuration), the highest silhouette width (.6692) is with hiearchical clustering at k=2. This may not be optimal for explicabliltiy, however, as noted below. There is a local maxima on the graph of scores at k=6 of 0.5881 for both kmeans and hierarchical (cannot see GMM score at this point, for some reason)
+which is lower, but might be a sacrifice worth making for being able to make more subgroupings.  
+
+c. What are reasons you could imagine selecting a technically “sub-optimal”
+partitioning method, regardless of the validation statistics?
+
+I could imagine chosing a technically “sub-optimal”
+partitioning method if I wanted to prioritize explainability of the model over technical accuracy. This
+highlights a major difference between computational social science as a field and machine learning in the academic field of computer science. In the former, its important that your conclusions be useful in explaining the world, rather than just provide predictions or groupings from a black box meathod (which is often the case in CS). 
+
+
